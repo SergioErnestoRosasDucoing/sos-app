@@ -1,0 +1,65 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: sos_ayuda
+    volumes:
+      - sos_ayuda_db_data:/var/lib/postgresql/data
+      # Auto-applied by the official postgres image on first init only.
+      - ./sos-ayuda-backend/src/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    ports:
+      - '5432:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  seed:
+    build: ./sos-ayuda-backend
+    command: ['node', 'dist/db/seed.js']
+    environment:
+      PGHOST: db
+      PGPORT: 5432
+      PGUSER: postgres
+      PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      PGDATABASE: sos_ayuda
+    depends_on:
+      db:
+        condition: service_healthy
+
+  backend:
+    build: ./sos-ayuda-backend
+    ports:
+      - '3001:3001'
+    environment:
+      PORT: 3001
+      PGHOST: db
+      PGPORT: 5432
+      PGUSER: postgres
+      PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      PGDATABASE: sos_ayuda
+      JWT_SECRET: ${JWT_SECRET:-change-me-to-a-long-random-secret}
+      JWT_EXPIRES_IN: 7d
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:soporte@sosayuda.mx}
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+
+  frontend:
+    build:
+      context: ./delightful-hawking
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:3001/api}
+        VITE_VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+    ports:
+      - '3000:80'
+    depends_on:
+      - backend
+
+volumes:
+  sos_ayuda_db_data:
